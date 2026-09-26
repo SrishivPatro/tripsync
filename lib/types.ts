@@ -46,5 +46,5 @@ export interface Prefs {
 export interface TripPayload {
   meta: TripMeta;
   responses: Record<string, Prefs>;
-  storage: "redis" | "memory";
+  storage: "supabase" | "redis" | "memory";
 }

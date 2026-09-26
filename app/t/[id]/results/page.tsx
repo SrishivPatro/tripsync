@@ -11,6 +11,57 @@ const STATUS_TEXT: Record<Status, string> = { happy: "Happy", okay: "Okay with i
 const STATUS_COLOR: Record<Status, string> = { happy: "var(--happy)", okay: "var(--okay)", stretch: "var(--stretch)", cant: "var(--cant)" };
 const RANK = ["1st", "2nd", "3rd"];
 
+type BriefData = { headline: string; summary: string; picks: { option: string; why: string }[]; watchouts: string[]; whatsapp: string; model: string; at: string };
+type BriefState = { status: "idle" | "loading" | "off" | "empty" | "error" | "ready"; data?: BriefData; stale?: boolean; message?: string };
+
+function BriefCard({ brief }: { brief: BriefState }) {
+  const [copied, setCopied] = useState(false);
+  if (brief.status === "off" || brief.status === "idle" || brief.status === "empty") return null;
+  if (brief.status === "loading" && !brief.data)
+    return (
+      <div className="card brief" style={{ marginTop: 18 }}>
+        <div className="brief-by"><span className="spark" />Gemini is reading everyone's answers…</div>
+        <div className="skeleton" /><div className="skeleton short" />
+      </div>
+    );
+  if (!brief.data)
+    return <div className="notice warn" style={{ marginTop: 18 }}>{brief.message || "The group briefing isn't available right now."} The options below are unaffected.</div>;
+  const b = brief.data;
+  const wa = `https://wa.me/?text=${encodeURIComponent(b.whatsapp)}`;
+  return (
+    <div className="card brief" style={{ marginTop: 18 }}>
+      <div className="brief-by"><span className="spark" />Group briefing by Gemini{brief.stale ? " (from earlier answers)" : ""}</div>
+      <h2>{b.headline}</h2>
+      <p className="brief-summary">{b.summary}</p>
+      <div className="brief-grid">
+        {b.picks.length > 0 && (
+          <div>
+            <h4>Option by option</h4>
+            <ul className="brief-list">{b.picks.map((p, i) => <li key={i}><b>{RANK[i] ?? ""} {p.option}:</b> {p.why}</li>)}</ul>
+          </div>
+        )}
+        {b.watchouts.length > 0 && (
+          <div>
+            <h4>Before you book</h4>
+            <ul className="brief-list warn">{b.watchouts.map((w, i) => <li key={i}>{w}</li>)}</ul>
+          </div>
+        )}
+      </div>
+      {b.whatsapp && (
+        <div className="brief-msg">
+          <h4>Message for the group</h4>
+          <blockquote>{b.whatsapp}</blockquote>
+          <div className="row">
+            <a className="btn sm" href={wa} target="_blank" rel="noreferrer">Send on WhatsApp</a>
+            <button className="btn ghost sm" onClick={() => { navigator.clipboard?.writeText(b.whatsapp); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>{copied ? "Copied" : "Copy message"}</button>
+          </div>
+        </div>
+      )}
+      <p className="brief-foot">Written by {b.model} from the scored options and everyone's notes. The ranking itself comes from the scoring rules, not the AI.</p>
+    </div>
+  );
+}
+
 function fmt(d: string) {
   return new Date(d + "T00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
@@ -22,6 +73,7 @@ export default function Results() {
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [brief, setBrief] = useState<BriefState>({ status: "idle" });
 
   const load = useCallback(() => {
     fetch(`/api/trips/${id}`, { cache: "no-store" })
@@ -41,6 +93,26 @@ export default function Results() {
   }, [load]);
 
   const ev = useMemo(() => (trip ? evaluate(trip.meta, trip.responses) : null), [trip]);
+
+  // Ask for a fresh Gemini briefing only when someone's answers (or the lock) actually change.
+  const sig = trip
+    ? trip.meta.members.map((m) => trip.responses[m]?.updatedAt ?? "-").join("|") + String(trip.meta.locked) + (trip.meta.decision?.destId ?? "")
+    : "";
+  useEffect(() => {
+    if (!sig) return;
+    let cancelled = false;
+    setBrief((b) => ({ ...b, status: "loading" }));
+    fetch(`/api/trips/${id}/brief`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        if (d.enabled === false) setBrief({ status: "off" });
+        else if (d.brief) setBrief({ status: "ready", data: d.brief, stale: d.stale });
+        else setBrief({ status: d.error ? "error" : "empty", message: d.error || d.reason });
+      })
+      .catch(() => !cancelled && setBrief({ status: "error", message: "Couldn't reach Gemini." }));
+    return () => { cancelled = true; };
+  }, [sig, id]);
 
   async function act(body: Record<string, string>) {
     setBusy(true);
@@ -115,11 +187,13 @@ export default function Results() {
         {ev.submitted.length > 0 && (
           <dl className="stats">
             <div><dt>Answered</dt><dd>{ev.submitted.length} of {meta.members.length}</dd></div>
-            <div><dt>Dates nobody ruled out</dt><dd>{ev.overlap.datesEveryoneCan.length ? ev.overlap.datesEveryoneCan.map((w) => w.label).join(", ") : "None yet"}</dd></div>
+            <div><dt>Dates nobody ruled out</dt><dd>{ev.overlap.datesEveryoneCan.length ? `${ev.overlap.datesEveryoneCan[0].label}${ev.overlap.datesEveryoneCan.length > 1 ? ` +${ev.overlap.datesEveryoneCan.length - 1} more` : ""}` : "None yet"}</dd></div>
             <div><dt>Budget everyone can do</dt><dd>Up to {rupees(ev.overlap.budgetEveryoneCan ?? 0)}</dd></div>
             <div><dt>Best fit right now</dt><dd>{ev.recommended[0]?.dest.name ?? "No match yet"}</dd></div>
           </dl>
         )}
+
+        {ev.submitted.length > 0 && <BriefCard brief={brief} />}
 
         {decided?.dest && decided.win && (
           <div className="decided" style={{ marginTop: 18 }}>
