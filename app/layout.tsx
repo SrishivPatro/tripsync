@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Mark } from "@/lib/ui";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -6,7 +7,7 @@ export const metadata: Metadata = {
   description: "Everyone adds their preferences once. The group gets three options and sees where each person stands.",
 };
 
-export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#16213E" };
+export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#0E3B43" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -21,9 +22,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <header className="topbar">
-          <a href="/" className="brand">Trip Decider</a>
+          <div className="wrap">
+            <a href="/" className="brand"><Mark /> Trip Decider</a>
+            <nav><a href="/">Start a new trip</a></nav>
+          </div>
         </header>
-        <main>{children}</main>
+        {children}
       </body>
     </html>
   );
